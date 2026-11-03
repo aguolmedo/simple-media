@@ -1,14 +1,13 @@
-use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::json;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, watch};
+
+use crate::ipc;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PlayerEvent {
@@ -30,7 +29,7 @@ pub struct Player {
 }
 
 pub struct Track<'a> {
-    pub path: &'a Path,
+    pub path: &'a std::path::Path,
     pub title: String,
     pub lang: &'a str,
 }
@@ -86,16 +85,12 @@ impl Measuring {
     }
 }
 
-fn socket_path() -> PathBuf {
-    std::env::temp_dir().join(format!("simple-media-mpv-{}.sock", std::process::id()))
-}
-
-fn spawn_mpv(launch: &Launch, socket: &Path) -> std::io::Result<Child> {
+fn spawn_mpv(launch: &Launch, endpoint: &ipc::Endpoint) -> std::io::Result<Child> {
     let mut command = Command::new("mpv");
     command
         .arg(&launch.url)
         .arg(format!("--force-media-title={}", launch.title))
-        .arg(format!("--input-ipc-server={}", socket.display()))
+        .arg(format!("--input-ipc-server={}", endpoint.address()))
         .arg("--force-window=immediate")
         .arg("--cache=yes")
         .arg("--ytdl=no")
@@ -109,9 +104,9 @@ fn spawn_mpv(launch: &Launch, socket: &Path) -> std::io::Result<Child> {
     command.spawn()
 }
 
-async fn connect(socket: &Path) -> Option<UnixStream> {
+async fn connect(endpoint: &ipc::Endpoint) -> Option<impl AsyncRead + AsyncWrite + Send + 'static> {
     for _ in 0..100 {
-        if let Ok(stream) = UnixStream::connect(socket).await {
+        if let Ok(stream) = endpoint.open().await {
             return Some(stream);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -120,7 +115,7 @@ async fn connect(socket: &Path) -> Option<UnixStream> {
 }
 
 async fn send_commands(
-    mut writer: OwnedWriteHalf,
+    mut writer: impl AsyncWrite + Unpin,
     mut commands: mpsc::UnboundedReceiver<serde_json::Value>,
     mut loaded: watch::Receiver<bool>,
 ) {
@@ -145,7 +140,7 @@ async fn send_commands(
     }
 }
 
-async fn read_events(reader: OwnedReadHalf, loaded: watch::Sender<bool>, on_event: &(impl Fn(PlayerEvent) + Send)) {
+async fn read_events(reader: impl AsyncRead + Unpin, loaded: watch::Sender<bool>, on_event: &(impl Fn(PlayerEvent) + Send)) {
     let mut lines = BufReader::new(reader).lines();
     let (mut position, mut duration, mut started) = (0.0, 0.0, false);
     let mut measuring = Measuring::default();
@@ -178,15 +173,14 @@ pub fn launch(launch: Launch, on_event: impl Fn(PlayerEvent) + Send + Sync + 'st
     let (stop_tx, stop_rx) = oneshot::channel();
     let (commands_tx, commands_rx) = mpsc::unbounded_channel();
     tokio::spawn(async move {
-        let socket = socket_path();
-        let _ = std::fs::remove_file(&socket);
-        let Ok(mut child) = spawn_mpv(&launch, &socket) else {
+        let endpoint = ipc::Endpoint::new();
+        let Ok(mut child) = spawn_mpv(&launch, &endpoint) else {
             on_event(PlayerEvent::Exited);
             return;
         };
-        let ipc = async {
-            if let Some(stream) = connect(&socket).await {
-                let (reader, writer) = stream.into_split();
+        let talk = async {
+            if let Some(stream) = connect(&endpoint).await {
+                let (reader, writer) = tokio::io::split(stream);
                 let (loaded_tx, loaded_rx) = watch::channel(false);
                 tokio::spawn(send_commands(writer, commands_rx, loaded_rx));
                 read_events(reader, loaded_tx, &on_event).await;
@@ -196,9 +190,9 @@ pub fn launch(launch: Launch, on_event: impl Fn(PlayerEvent) + Send + Sync + 'st
         tokio::select! {
             _ = child.wait() => {}
             _ = stop_rx => { let _ = child.kill().await; }
-            _ = ipc => {}
+            _ = talk => {}
         }
-        let _ = std::fs::remove_file(&socket);
+        drop(endpoint);
         on_event(PlayerEvent::Exited);
     });
     Player { stop: Some(stop_tx), commands: commands_tx }

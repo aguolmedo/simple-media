@@ -5,24 +5,20 @@ use serde::de::DeserializeOwned;
 
 const APP: &str = "simple-media";
 
-fn base_dir(xdg_var: &str, home_fallback: &str) -> PathBuf {
-    std::env::var_os(xdg_var)
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(home_fallback)))
-        .unwrap_or_else(std::env::temp_dir)
-        .join(APP)
+fn base_dir(dir: Option<PathBuf>) -> PathBuf {
+    dir.unwrap_or_else(std::env::temp_dir).join(APP)
 }
 
 pub fn cache_dir() -> PathBuf {
-    base_dir("XDG_CACHE_HOME", ".cache")
+    base_dir(dirs::cache_dir())
 }
 
 fn data_dir() -> PathBuf {
-    base_dir("XDG_DATA_HOME", ".local/share")
+    base_dir(dirs::data_dir())
 }
 
 pub fn library_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("movies")
+    dirs::home_dir().unwrap_or_else(std::env::temp_dir).join("movies")
 }
 
 fn data_file(name: &str) -> PathBuf {

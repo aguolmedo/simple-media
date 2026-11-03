@@ -102,7 +102,7 @@ impl Listed {
         let files = response
             .info
             .iter_file_details()
-            .map(|f| TorrentFile { path: f.filename.to_string(), length: f.len })
+            .map(|f| TorrentFile { path: f.filename.to_string().replace(std::path::MAIN_SEPARATOR, "/"), length: f.len })
             .collect();
         Listed { files, torrent_bytes: response.torrent_bytes.to_vec(), seen_peers: response.seen_peers }
     }

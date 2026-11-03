@@ -5,6 +5,7 @@ mod downloads;
 mod engine;
 mod history;
 mod http;
+mod ipc;
 mod library;
 mod player;
 mod poster;

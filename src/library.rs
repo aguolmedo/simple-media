@@ -14,8 +14,8 @@ const MAX_DEPTH: usize = 3;
 pub const ON_DISK: &str = "On disk";
 
 pub fn folder_for(title: &Title) -> PathBuf {
-    let name: String = title.name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '\0')).collect();
-    let name = name.trim();
+    let name: String = title.name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0')).collect();
+    let name = name.trim().trim_end_matches('.');
     let folder = match title.first_year() {
         Some(year) => format!("{name} ({year})"),
         None => name.to_string(),

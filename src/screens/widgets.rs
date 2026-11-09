@@ -225,6 +225,8 @@ pub fn position(mouse: &MouseEvent) -> Position {
     Position::new(mouse.column, mouse.row)
 }
 
+const HINT_GAP: u16 = 3;
+
 pub fn footer(frame: &mut Frame, area: Rect, hints: &[(&str, &str)]) {
     let mut spans = Vec::new();
     for (i, (key, label)) in hints.iter().enumerate() {
@@ -235,6 +237,24 @@ pub fn footer(frame: &mut Frame, area: Rect, hints: &[(&str, &str)]) {
         spans.push(Span::raw(format!(" {label}")).fg(DIM));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+pub fn hint_at(hints: &[(&str, &str)], area: Rect, at: Position) -> Option<usize> {
+    if !area.contains(at) {
+        return None;
+    }
+    let mut start = area.x;
+    for (i, (key, label)) in hints.iter().enumerate() {
+        if i > 0 {
+            start += HINT_GAP;
+        }
+        let width = Line::from(format!("{key} {label}")).width() as u16;
+        if (start..start + width).contains(&at.x) {
+            return Some(i);
+        }
+        start += width;
+    }
+    None
 }
 
 pub fn message(frame: &mut Frame, area: Rect, text: &str) {
@@ -326,5 +346,11 @@ mod tests {
         assert_eq!(tab_at(&labels, area, Position::new(12, 6)), Some(2));
         assert_eq!(clock(3725.0), "1:02:05");
         assert_eq!(bar(0.5, 4), "██░░");
+        let hints = [("⏎", "watch next"), ("esc", "back")];
+        let footer = Rect::new(2, 20, 40, 1);
+        assert_eq!(hint_at(&hints, footer, Position::new(3, 20)), Some(0));
+        assert_eq!(hint_at(&hints, footer, Position::new(15, 20)), None);
+        assert_eq!(hint_at(&hints, footer, Position::new(17, 20)), Some(1));
+        assert_eq!(hint_at(&hints, footer, Position::new(17, 19)), None);
     }
 }

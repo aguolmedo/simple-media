@@ -3,21 +3,19 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use image::RgbImage;
-use image::imageops::FilterType;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::widgets::Widget;
 
-use crate::storage::cache_dir;
+use crate::blocks::{Blocks, Cell, OCTANTS, SEXTANTS};
 use crate::http;
+use crate::storage::cache_dir;
 
 const BACKDROP_BRIGHTNESS: f32 = 0.3;
 const BACKDROP_MAX_WIDTH: u32 = 480;
 
 pub type Picture = Arc<Image>;
-
-type Cell = (char, Color, Color);
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Art {
@@ -32,6 +30,13 @@ impl Art {
             Art::Backdrop => "background",
         };
         format!("https://images.metahub.space/{kind}/medium/{title_id}/img")
+    }
+
+    fn blocks(self) -> &'static Blocks {
+        match self {
+            Art::Poster => &OCTANTS,
+            Art::Backdrop => &SEXTANTS,
+        }
     }
 
     fn cache(self) -> PathBuf {
@@ -60,9 +65,10 @@ impl Image {
         match mosaic.as_ref() {
             Some((w, h, cells)) if (*w, *h) == (width, height) => cells.clone(),
             _ => {
+                let blocks = self.art.blocks();
                 let cells = match self.art {
-                    Art::Poster => quadrants(&self.pixels, width, height),
-                    Art::Backdrop => quadrants(&darken(cover(&self.pixels, width, height)), width, height),
+                    Art::Poster => blocks.cells(&self.pixels, width, height),
+                    Art::Backdrop => blocks.cells(&darken(cover(&self.pixels, width, height)), width, height),
                 };
                 *mosaic = Some((width, height, cells.clone()));
                 cells
@@ -163,55 +169,4 @@ fn blend(a: Color, b: Color) -> Color {
         }
         _ => b,
     }
-}
-
-fn quadrants(image: &RgbImage, width: u16, height: u16) -> Vec<Cell> {
-    let small = image::imageops::resize(image, u32::from(width) * 2, u32::from(height) * 2, FilterType::Lanczos3);
-    let cell = |column: u16, row: u16| {
-        let (x, y) = (u32::from(column) * 2, u32::from(row) * 2);
-        let pixels = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)].map(|(x, y)| small.get_pixel(x, y).0);
-        best_split(&pixels)
-    };
-    (0..height).flat_map(|row| (0..width).map(move |column| cell(column, row))).collect()
-}
-
-const QUADRANTS: [(u8, char); 8] =
-    [(1, '▘'), (2, '▝'), (3, '▀'), (4, '▖'), (5, '▌'), (6, '▞'), (7, '▛'), (15, '█')];
-
-type Pixel = [u8; 3];
-
-fn best_split(pixels: &[Pixel; 4]) -> Cell {
-    let split = |mask: u8| {
-        let inside = |i: &usize| mask >> i & 1 == 1;
-        let fg: Vec<Pixel> = (0..4).filter(inside).map(|i| pixels[i]).collect();
-        let bg: Vec<Pixel> = (0..4).filter(|i| !inside(i)).map(|i| pixels[i]).collect();
-        let (fg_mean, bg_mean) = (mean(&fg), mean(&bg));
-        let error = distance_sum(&fg, fg_mean) + distance_sum(&bg, bg_mean);
-        (error, fg_mean, bg_mean)
-    };
-    let ((_, fg, bg), symbol) = QUADRANTS
-        .iter()
-        .map(|&(mask, symbol)| (split(mask), symbol))
-        .min_by_key(|((error, _, _), _)| *error)
-        .expect("there are quadrants");
-    (symbol, rgb(fg), rgb(bg))
-}
-
-fn mean(pixels: &[Pixel]) -> Pixel {
-    if pixels.is_empty() {
-        return [0; 3];
-    }
-    let channel = |c: usize| (pixels.iter().map(|p| u32::from(p[c])).sum::<u32>() / pixels.len() as u32) as u8;
-    [channel(0), channel(1), channel(2)]
-}
-
-fn distance_sum(pixels: &[Pixel], center: Pixel) -> u32 {
-    pixels
-        .iter()
-        .flat_map(|p| (0..3).map(move |c| u32::from(p[c].abs_diff(center[c])).pow(2)))
-        .sum()
-}
-
-fn rgb([r, g, b]: Pixel) -> Color {
-    Color::Rgb(r, g, b)
 }

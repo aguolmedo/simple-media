@@ -1,5 +1,6 @@
 mod app;
 mod archive;
+mod blocks;
 mod catalog;
 mod downloads;
 mod engine;

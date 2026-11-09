@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Frame;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::Stylize;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -49,6 +50,8 @@ pub struct Playing {
     measured: Option<oneshot::Sender<Measured>>,
     next_request: Option<Pending>,
     error: Option<String>,
+    next_area: Rect,
+    footer_area: Rect,
 }
 
 impl Playing {
@@ -73,6 +76,8 @@ impl Playing {
             measured: None,
             next_request: None,
             error: None,
+            next_area: Rect::default(),
+            footer_area: Rect::default(),
         }
     }
 
@@ -116,6 +121,34 @@ impl Playing {
             (KeyCode::Enter, Phase::Finished { next: Some(Some(next)) }) => self.play_next(next.clone()),
             (KeyCode::Esc | KeyCode::Char('q'), _) => Action::Pop,
             _ => Action::None,
+        }
+    }
+
+    pub fn on_mouse(&mut self, mouse: MouseEvent) -> Action {
+        let at = widgets::position(&mouse);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Right) => Action::Pop,
+            MouseEventKind::Down(MouseButton::Left) => self.click(at),
+            _ => Action::None,
+        }
+    }
+
+    fn click(&mut self, at: Position) -> Action {
+        if self.next_area.contains(at) {
+            return self.on_key(KeyEvent::from(KeyCode::Enter));
+        }
+        let hints = self.hints();
+        let labels: Vec<(&str, &str)> = hints.iter().map(|(key, label, _)| (*key, *label)).collect();
+        match widgets::hint_at(&labels, self.footer_area, at) {
+            Some(i) => self.on_key(KeyEvent::from(hints[i].2)),
+            None => Action::None,
+        }
+    }
+
+    fn hints(&self) -> &'static [(&'static str, &'static str, KeyCode)] {
+        match self.phase {
+            Phase::Finished { next: Some(Some(_)) } => &[("⏎", "watch next", KeyCode::Enter), ("esc", "back", KeyCode::Esc)],
+            _ => &[("esc", "stop and go back", KeyCode::Esc), ("j in mpv", "switch subtitle", KeyCode::Null)],
         }
     }
 
@@ -275,9 +308,17 @@ impl Playing {
             lines.push(Line::from(Span::raw(format!("📄 {}", playback.file.name())).fg(DIM)));
         }
         lines.push(Line::default());
+        self.next_area = Rect::default();
         match &self.error {
             Some(error) => lines.push(Line::from(format!("Could not open the torrent: {error}")).red()),
-            None => lines.extend(self.phase_lines()),
+            None => {
+                let phase = self.phase_lines();
+                if matches!(self.phase, Phase::Finished { next: Some(Some(_)) }) {
+                    let row = areas.body.y + (lines.len() + phase.len() - 1) as u16;
+                    self.next_area = Rect { y: row, height: 1, ..areas.body }.intersection(areas.body);
+                }
+                lines.extend(phase);
+            }
         }
         if self.playback.is_some() {
             lines.push(Line::default());
@@ -286,11 +327,9 @@ impl Playing {
         }
         frame.render_widget(Paragraph::new(lines), areas.body);
 
-        let hints: &[(&str, &str)] = match self.phase {
-            Phase::Finished { next: Some(Some(_)) } => &[("⏎", "watch next"), ("esc", "back")],
-            _ => &[("esc", "stop and go back"), ("j in mpv", "switch subtitle")],
-        };
-        widgets::footer(frame, areas.footer, hints);
+        let hints: Vec<(&str, &str)> = self.hints().iter().map(|(key, label, _)| (*key, *label)).collect();
+        widgets::footer(frame, areas.footer, &hints);
+        self.footer_area = areas.footer;
     }
 
     fn phase_lines(&self) -> Vec<Line<'static>> {

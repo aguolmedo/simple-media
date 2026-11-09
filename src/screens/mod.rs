@@ -73,7 +73,7 @@ impl Screen {
             Screen::Home(s) => s.on_mouse(mouse, ctx),
             Screen::Series(s) => s.on_mouse(mouse),
             Screen::Streams(s) => s.on_mouse(mouse),
-            Screen::Playing(_) => Action::None,
+            Screen::Playing(s) => s.on_mouse(mouse),
         }
     }
 

@@ -26,7 +26,7 @@ central server.
 ## Requirements
 
 - [Rust](https://rustup.rs) (edition 2024)
-- [mpv](https://mpv.io) in your `PATH`
+- [mpv](https://mpv.io) in your `PATH` (on macOS, a Homebrew or `.app` install is also found)
 - A terminal with true colour and mouse support (on Windows, Windows Terminal)
 
 Works on Linux, macOS and Windows.

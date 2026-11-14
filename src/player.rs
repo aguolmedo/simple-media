@@ -85,8 +85,18 @@ impl Measuring {
     }
 }
 
+fn mpv_program() -> std::ffi::OsString {
+    #[cfg(target_os = "macos")]
+    for candidate in ["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv", "/Applications/mpv.app/Contents/MacOS/mpv"] {
+        if std::path::Path::new(candidate).exists() {
+            return candidate.into();
+        }
+    }
+    "mpv".into()
+}
+
 fn spawn_mpv(launch: &Launch, endpoint: &ipc::Endpoint) -> std::io::Result<Child> {
-    let mut command = Command::new("mpv");
+    let mut command = Command::new(mpv_program());
     command
         .arg(&launch.url)
         .arg(format!("--force-media-title={}", launch.title))
